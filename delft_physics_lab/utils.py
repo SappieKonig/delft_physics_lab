@@ -2,6 +2,7 @@ import numpy as np
 from scipy import constants
 from typing import Tuple, List
 from math import degrees, atan
+from functools import cache
 
 pi = constants.pi  # define pi, the ratio of the circumference of a circle to its diameter
 g = constants.g    # define the gravitational acceleration on earth, in ms^-2
@@ -68,6 +69,14 @@ def fibonacci_sequence(n) -> List[int]:
         a, b = b, a + b
         fibo_sequence += [b]
     return fibo_sequence
+
+
+# a showcase of recurrence (in this case of course completely unnecessary) and function decorators
+# function values are stored, as in, for 10!, we have to calculate 9!. If we:
+# call f(10), and after that call f(9), then f(9) will not be calculated, as it is cached
+@cache
+def factorial(n):
+    return n * factorial(n-1) if n else 1
 
 
 class EstimatePi:
