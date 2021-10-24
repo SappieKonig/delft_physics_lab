@@ -2,7 +2,8 @@ import numpy as np
 from scipy import constants
 from typing import Tuple, List
 from math import degrees, atan
-from functools import cache
+from functools import lru_cache
+import tensorflow as tf
 
 pi = constants.pi  # define pi, the ratio of the circumference of a circle to its diameter
 g = constants.g    # define the gravitational acceleration on earth, in ms^-2
@@ -74,7 +75,7 @@ def fibonacci_sequence(n) -> List[int]:
 # a showcase of recurrence (in this case of course completely unnecessary) and function decorators
 # function values are stored, as in, for 10!, we have to calculate 9!. If we:
 # call f(10), and after that call f(9), then f(9) will not be calculated, as it is cached
-@cache
+@lru_cache(maxsize=None)
 def factorial(n):
     return n * factorial(n-1) if n else 1
 
@@ -125,3 +126,100 @@ class EstimatePi:
         error = abs(pi_estimation - pi)
 
         return error, pi_estimation
+
+
+def functional_std_approximation(f, variables: List[Tuple[float]], size=1000):
+    """
+    Give a functional approximation of the standard deviation after performing a function on the inputs.
+    """
+    return np.std(f(*[np.random.normal(m, s, size=size) for m, s in variables]))
+
+
+def calculus_std_approximation(f, variables: List[Tuple[float]]):
+    """
+    Give an approximation of the standard deviation after performing a function on the inputs, using calculus.
+
+    Uses the autograd property of tensorflow to calculate the derivatives. 
+    """
+    tf_variables = [tf.Variable(x[0]) for x in variables]
+    # log the variables using GradientTape, so the derivatives can later be easily extracted
+    with tf.GradientTape() as tape:
+        y = f(*tf_variables)
+    derivatives = np.abs(np.array(tape.gradient(y, tf_variables)))
+
+    # add different derivatives using root of the sum of squares
+    relative_uncertainties = [(derivative * x[1])**2 for derivative, x in zip(derivatives, variables)]
+    uncertainty = np.sum(relative_uncertainties)**.5
+    return uncertainty
+
+
+def unpack_variables(variables: List[Tuple]):
+    """
+    Unpack variables so they can be used for std_approximation. (Think of reshaping, turning into numpy arrays, etc).
+    """
+    shapes = [np.array(variable[0]).shape for variable in variables] + [(1,)]
+    cast_shape = max(shapes, key=len)
+    return [(cast_to(variable[0], cast_shape), cast_to(variable[1], cast_shape)) 
+            for variable in variables], cast_shape
+
+
+def eval(f, variables):
+    return f(*[variable[0] for variable in variables])
+
+
+def cast_to(variable: List[Tuple], shape: Tuple[int]):
+    """
+    Return the variables as numpy arrays to be easily passed into the calculus and functional methods.
+    """
+    v_shape = np.array(variable).shape
+    cast_shape = []
+    orig_shape = []
+    i = 0
+    for dim in shape:
+        if i < len(v_shape) and dim == v_shape[i]:
+            cast_shape += [1]
+            orig_shape += [v_shape[i]]
+            i += 1
+            continue
+        cast_shape += [dim]
+        orig_shape += [1]
+    return np.array(variable).reshape(orig_shape)*np.ones(cast_shape)
+
+
+def std_approximation(f, variables: List[Tuple[float, float]], approx_type: str = 'functional', evaluate: bool = False, *args, **kwargs):
+    """
+    :input f: any function that takes the given variables as input
+    :input variables: a list of variables in the form of (value, std). Variables should be given in the same order,
+                      as they are to be passed to the function in question. Numpy arrays are also accepted.
+    :input approx_type: either 'functional' or 'calculus', to specify which type of approximation to use.
+                        - functional: accurate
+                        - calculus: fast and stable
+    :input evaluate: determine whether the value of the function using the starting values as input should also be returned.
+    
+    :returns: the standard deviation of the function given variables and their respective standard deviations
+    """
+    unpacked, cast_shape = unpack_variables(variables)
+
+    if approx_type == 'functional':
+        approx_f = functional_std_approximation
+    elif approx_type == 'calculus':
+        approx_f = calculus_std_approximation
+    else:
+        print("This type of approximation is not supported")
+
+    std = []
+    evaluations = []
+    for i in range(cast_shape[0]):
+        var_slice = [(var[0][i], var[1][i]) for var in unpacked]
+        std += [approx_f(f, var_slice, *args, **kwargs)]
+        evaluations += [eval(f, var_slice)]
+    std = np.array(std)
+    if evaluate:
+        return np.squeeze(std), evaluations[0] if len(evaluations) <= 1 else np.array(evaluations)
+    return np.squeeze(std)
+
+
+
+
+
+
